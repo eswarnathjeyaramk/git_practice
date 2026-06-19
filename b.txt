@@ -1,3 +1,4 @@
 This is my second file
 Adding a second line to B
 Making a change to file B
+Adding an experimental feature to B
