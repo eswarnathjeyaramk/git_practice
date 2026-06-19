@@ -1,0 +1,12 @@
+name: Hello CI
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run my first CI commands
+        run: |
+          echo "Hello from CI!"
+          date
+          echo "Triggering commit: ${{ github.sha }}"
