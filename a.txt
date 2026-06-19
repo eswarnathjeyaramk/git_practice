@@ -1,4 +1,1 @@
-This is my first file
-Adding a second line to A
-Making a specific change to file A
-Adding an experiment to A
+master version
