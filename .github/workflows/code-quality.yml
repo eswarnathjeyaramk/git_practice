@@ -1,0 +1,71 @@
+name: Code Quality Checks
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install pycodestyle
+        run: pip install pycodestyle
+
+      - name: 1. Run pycodestyle & Comment via API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          pycodestyle . > pycodestyle_report.txt || true
+
+          if [ -s pycodestyle_report.txt ]; then
+            REPORT=$(cat pycodestyle_report.txt)
+            PAYLOAD=$(jq -n --arg body "### Pycodestyle Violations 🚨\n\`\`\`text\n$REPORT\n\`\`\`" '{body: $body}')
+
+            curl -s -X POST -H "Authorization: token $GH_TOKEN" \
+                 -H "Accept: application/vnd.github.v3+json" \
+                 -d "$PAYLOAD" \
+                 "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
+
+            echo "Pycodestyle violations found and commented on PR."
+            exit 1
+          fi
+
+      - name: 2. Check File Length (Max 100 lines)
+        run: |
+          FAIL=0
+          for file in $(find . -name "*.py"); do
+            LINES=$(wc -l < "$file")
+            if [ "$LINES" -gt 100 ]; then
+              echo "❌ $file has $LINES lines (limit 100)"
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" -eq 1 ]; then exit 1; fi
+
+      - name: 3. Check Docstrings
+        run: |
+          python -c '
+          import sys, glob
+          fail = False
+          for f in glob.glob("**/*.py", recursive=True):
+              lines = open(f).readlines()
+              for i, line in enumerate(lines):
+                  if line.strip().startswith("def "):
+                      if i + 1 >= len(lines) or ("\"\"\"" not in lines[i+1] and "'''" not in lines[i+1]):
+                          print(f"❌ {f}:{i+2} Missing triple quotes on line after def")
+                          fail = True
+          if fail: sys.exit(1)
+          '
