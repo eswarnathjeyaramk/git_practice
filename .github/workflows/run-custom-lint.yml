@@ -15,7 +15,7 @@ jobs:
       # Here you are calling the tool you just built!
       - name: Run My Custom Verilator Action
         id: my_linter
-        uses: eswarnathjeyaramk/verilator-lint-action@v1
+        uses: eswarnathjeyaramk/verilator-lint-action@main
         with:
           files: 'good.sv bad.sv'
           severity: 'error'
