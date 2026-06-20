@@ -1,0 +1,82 @@
+name: PR Automated Reviewer
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+
+      - name: Generate Stats and Comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+
+          DIFF_STAT=$(git diff --stat $BASE_SHA...$HEAD_SHA)
+
+          ADD=0; REM=0; FILES=0
+          while read a r f; do
+            if [[ "$a" != "-" ]]; then ADD=$((ADD + a)); fi
+            if [[ "$r" != "-" ]]; then REM=$((REM + r)); fi
+            FILES=$((FILES + 1))
+          done <<< "$(git diff --numstat $BASE_SHA...$HEAD_SHA)"
+
+          CHANGED_FILES=$(git diff --name-only $BASE_SHA...$HEAD_SHA)
+          TODO_LIST=""
+          for file in $CHANGED_FILES; do
+            if [ -f "$file" ]; then
+
+              GREP_RES=$(grep -nE "TODO|FIXME" "$file" || true)
+              if [ ! -z "$GREP_RES" ]; then
+                TODO_LIST="$TODO_LIST\n**$file**\n\`\`\`text\n$GREP_RES\n\`\`\`\n"
+              fi
+            fi
+          done
+          if [ -z "$TODO_LIST" ]; then
+            TODO_LIST="_No TODOs or FIXMEs found in changed files._"
+          fi
+
+          MARKER=""
+          BODY="$MARKER
+
+          - **Files Changed:** $FILES
+          - **Lines Added:** $ADD 🟢
+          - **Lines Removed:** $REM 🔴
+
+          $TODO_LIST
+
+          <details>
+          <summary>Click to expand</summary>
+
+          \`\`\`text
+          $DIFF_STAT
+          \`\`\`
+          </details>"
+
+          PAYLOAD=$(jq -n --arg body "$BODY" '{body: $body}')
+
+          COMMENTS_URL="https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
+          COMMENT_ID=$(curl -s -H "Authorization: Bearer $GH_TOKEN" $COMMENTS_URL | jq -r ".[] | select(.body | contains(\"$MARKER\")) | .id" | head -n 1)
+
+          if [ -z "$COMMENT_ID" ] || [ "$COMMENT_ID" == "null" ]; then
+            echo "Creating new comment..."
+            curl -s -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" -d "$PAYLOAD" $COMMENTS_URL
+          else
+            echo "Updating existing comment $COMMENT_ID..."
+            UPDATE_URL="https://api.github.com/repos/$REPO/issues/comments/$COMMENT_ID"
+            curl -s -X PATCH -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" -d "$PAYLOAD" $UPDATE_URL
+          fi
